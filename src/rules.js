@@ -11,6 +11,7 @@ const Rules = (() => {
     '1600': { label: '1600', start: t(15, 48), end: t(24) },
     N1: { label: 'N1', start: t(20), end: t(30) },
     N2: { label: 'N2', start: t(21, 30), end: t(31, 30) },
+    NC: { label: 'NC', start: t(20), end: t(30) },
     B: { label: 'Büro', start: t(9), end: t(17, 12) },
     I: { label: 'Instruktion', start: t(9), end: t(17, 12) },
     L: { label: 'Leave' },
@@ -18,10 +19,10 @@ const Rules = (() => {
     F: { label: 'Ferien' },
   };
   const SHIFTS = ['0530', '0730', '0930', '1400', '1600', 'N1', 'N2'];
-  const CODE_ORDER = [...SHIFTS, 'B', 'I', 'L', 'R', 'F'];
-  const WORK = new Set([...SHIFTS, 'B', 'I']);
+  const CODE_ORDER = [...SHIFTS, 'NC', 'B', 'I', 'L', 'R', 'F'];
+  const WORK = new Set([...SHIFTS, 'NC', 'B', 'I']);
   const FREE = new Set(['R', 'F', 'L']);
-  const NEXT_IN_BLOCK = { 1600: 'N1', N1: 'N2', N2: 'L', L: 'R' };
+  const NEXT_IN_BLOCK = { 1600: 'N1', N1: 'N2', N2: 'L', NC: 'L', L: 'R' };
 
   const STANDARD_HOURS = 8.2;
   const WORK_DAYS_PER_YEAR = 248;
@@ -33,7 +34,6 @@ const Rules = (() => {
   };
   // Dienstzeit plus 10 Minuten Zeitzuschlag pro Nachtstunde (20 bis 6 Uhr), anteilig gerechnet.
   const creditedHours = (c) => {
-    if (c === 'F') return STANDARD_HOURS;
     if (!WORK.has(c)) return 0;
     const { start, end } = CODES[c];
     return (end - start) / 60 + (nightMinutes(c) / 60) * (10 / 60);
@@ -59,6 +59,12 @@ const Rules = (() => {
   const yearMonths = (year) =>
     Array.from({ length: 12 }, (_, i) => `${year}-${String(i + 1).padStart(2, '0')}`);
   const daysInYear = (year) => yearMonths(year).reduce((sum, ym) => sum + daysInMonth(ym), 0);
+  // AIRAC: alle 28 Tage an einem Mittwoch, gerechnet ab dem Termin vom 25. November 2026.
+  const AIRAC_ANCHOR = '2026-11-25';
+  const isAirac = (iso) => {
+    const days = Math.round((toDate(iso) - toDate(AIRAC_ANCHOR)) / 864e5);
+    return ((days % 28) + 28) % 28 === 0;
+  };
   const instructionDates = (ym) => monthDates(ym).filter((d) => weekday(d) === 2).slice(0, 3);
 
   const getCode = (plan, pid, date) => plan[pid]?.[date]?.c ?? null;
@@ -78,12 +84,13 @@ const Rules = (() => {
     return 29;
   };
 
-  const yearTargetR = (person, year) => daysInYear(year) - WORK_DAYS_PER_YEAR * (person.pensum / 100);
+  // 117 R-Tage bei 100 %, je 10 Prozentpunkte weniger Pensum geben 22 R-Tage mehr.
+  const yearTargetR = (person) => 117 + (100 - person.pensum) * 2.2;
 
   // Monatsziel: Anteil am Jahresziel plus Rückstand aus den bereits geplanten Monaten des Jahres.
   const monthTargetR = (person, plan, ym) => {
     const year = Number(ym.slice(0, 4));
-    const perDay = yearTargetR(person, year) / daysInYear(year);
+    const perDay = yearTargetR(person) / daysInYear(year);
     let carry = 0;
     for (const m of yearMonths(year)) {
       if (m >= ym) break;
@@ -146,6 +153,11 @@ const Rules = (() => {
           add('fehler', 'Besetzung', extra.id, d, `${fmtDate(d)}: Schicht ${s} ist mehrfach besetzt.`);
         }
       }
+      const nc = persons.filter((p) => getCode(plan, p.id, d) === 'NC');
+      if (isAirac(d) && nc.length === 0) add('fehler', 'AIRAC', null, d, `${fmtDate(d)}: AIRAC, Schicht NC ist nicht besetzt.`);
+      for (const extra of nc.slice(isAirac(d) ? 1 : 0)) {
+        add('fehler', 'AIRAC', extra.id, d, `${fmtDate(d)}: NC gibt es nur einmal und nur am AIRAC-Termin.`);
+      }
     }
 
     for (const p of persons) {
@@ -167,10 +179,14 @@ const Rules = (() => {
           const ok = c === 'L' ? after === 'R' || after === 'F' : after === expected;
           if (!ok) issue('fehler', 'Nachtblock', d, `Auf ${CODES[c].label} muss ${expected === 'R' ? 'ein R-Tag oder Ferien' : CODES[expected].label} folgen.`);
         }
-        const previous = { N1: '1600', N2: 'N1', L: 'N2' }[c];
+        const previous = { N1: '1600', N2: 'N1' }[c];
         if (previous && before && before !== previous) {
           issue('fehler', 'Nachtblock', d, `Vor ${CODES[c].label} muss ${CODES[previous].label} liegen.`);
         }
+        if (c === 'L' && before && before !== 'N2' && before !== 'NC') {
+          issue('fehler', 'Nachtblock', d, 'Vor Leave muss N2 oder NC liegen.');
+        }
+        if (c === 'NC' && !p.nc) issue('fehler', 'AIRAC', d, 'Diese Person ist nicht für NC vorgesehen.');
       }
 
       // Art. 2.3 und 3.1: Ruhezeiten
@@ -225,7 +241,7 @@ const Rules = (() => {
 
       // Art. 5.1 Abs. 2: höchstens 14 Nachtarbeiten in 28 Tagen
       for (const end of dates) {
-        const nights = Array.from({ length: 28 }, (_, i) => code(addDays(end, -i))).filter((c) => c === 'N1' || c === 'N2').length;
+        const nights = Array.from({ length: 28 }, (_, i) => code(addDays(end, -i))).filter((c) => c === 'N1' || c === 'N2' || c === 'NC').length;
         if (nights > 14) {
           issue('fehler', 'Nachtarbeit', end, `${nights} Nachtarbeiten in 28 Tagen, erlaubt sind 14.`);
           break;
@@ -279,7 +295,40 @@ const Rules = (() => {
     const c = getCode(plan, pid, d);
     if (c !== 'R' && c !== 'F') return false;
     const before = getCode(plan, pid, addDays(d, -1));
-    return before !== 'N1' && before !== 'N2';
+    return before !== 'N1' && before !== 'N2' && before !== 'NC';
+  };
+
+  // Wünsche: { pid: { datum: code } }. Sie sind unverbindlich, GAV und Besetzung gehen immer vor.
+  const MAX_WISHES_PER_MONTH = 5;
+  const WISH_CODES = ['R', '0530', '0730', '0930', '1400', '1600', 'B'];
+  const WISH_LABELS = { R: 'Frei', 1600: 'Nachtblock', B: 'Büro' };
+  const wishLabel = (c) => WISH_LABELS[c] ?? c;
+
+  const wishFulfilled = (c, actual) => (c === 'R' ? FREE.has(actual) : c === actual);
+
+  const wishesInMonth = (wishes, pid, ym) =>
+    Object.keys(wishes[pid] ?? {}).filter((d) => d.startsWith(ym)).sort();
+
+  const wishResults = (persons, wishes, plan, ym) => {
+    const results = [];
+    for (const p of persons) {
+      for (const date of wishesInMonth(wishes, p.id, ym)) {
+        const code = wishes[p.id][date];
+        const actual = getCode(plan, p.id, date);
+        results.push({ pid: p.id, name: p.name, date, code, actual, ok: wishFulfilled(code, actual) });
+      }
+    }
+    return results;
+  };
+
+  // Erfüllte Wünsche pro Person in den Monaten des Jahres vor dem gewählten Monat.
+  const wishesFulfilledBefore = (persons, wishes, plan, ym) => {
+    const counts = Object.fromEntries(persons.map((p) => [p.id, 0]));
+    for (const m of yearMonths(Number(ym.slice(0, 4)))) {
+      if (m >= ym) break;
+      for (const r of wishResults(persons, wishes, plan, m)) if (r.ok) counts[r.pid]++;
+    }
+    return counts;
   };
 
   const account = (person, plan, year) => {
@@ -294,7 +343,8 @@ const Rules = (() => {
         if (!c) continue;
         counts[c]++;
         plannedDays++;
-        hours += creditedHours(c);
+        // Ein Ferientag zählt entsprechend dem Pensum.
+        hours += c === 'F' ? STANDARD_HOURS * (person.pensum / 100) : creditedHours(c);
         if (isSunday(d) && isFreeSunday(plan, person.id, d)) freeSundays++;
         if (isWeekend(d) && WORK.has(c)) workedWeekendDays++;
       }
@@ -309,7 +359,7 @@ const Rules = (() => {
       freeSundays,
       workedWeekendDays,
       nightBlocks: counts['1600'],
-      targetR: yearTargetR(person, year),
+      targetR: yearTargetR(person),
       vacationEntitlement: vacationDays(person.birthYear, year),
     };
   };
@@ -317,8 +367,9 @@ const Rules = (() => {
   return {
     CODES, SHIFTS, CODE_ORDER, WORK, FREE, NEXT_IN_BLOCK,
     creditedHours, addDays, weekday, isWeekend, isSunday, daysInMonth, monthDates, yearMonths,
-    instructionDates, getCode, isPinned, setCode, vacationDays, yearTargetR, monthTargetR,
+    instructionDates, isAirac, getCode, isPinned, setCode, vacationDays, yearTargetR, monthTargetR,
     requiredRest, workPairs, validate, isFreeSunday, account, fmtDate, mondayOf,
+    MAX_WISHES_PER_MONTH, WISH_CODES, wishLabel, wishesInMonth, wishResults, wishesFulfilledBefore,
   };
 })();
 

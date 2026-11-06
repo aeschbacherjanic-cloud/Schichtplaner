@@ -19,6 +19,27 @@ const test = (name, fn) => {
   console.log(`ok - ${name}`);
 };
 
+test('AIRAC alle 28 Tage ab 25.11.2026, immer Mittwoch', () => {
+  assert.equal(R.isAirac('2026-11-25'), true);
+  assert.equal(R.isAirac('2026-12-23'), true);
+  assert.equal(R.isAirac('2027-01-20'), true);
+  assert.equal(R.isAirac('2026-10-28'), true);
+  assert.equal(R.isAirac('2026-12-16'), false);
+  for (let d = '2026-11-25', i = 0; i < 30; i++, d = R.addDays(d, 28)) assert.equal(R.weekday(d), 2);
+});
+
+test('AIRAC: NC nur für festgelegte Personen, am Termin, danach Leave und frei', () => {
+  const nc = [{ id: 'a', name: 'a', pensum: 100, birthYear: 1985, nc: true }];
+  const no = [{ id: 'a', name: 'a', pensum: 100, birthYear: 1985, nc: false }];
+  const good = R.validate(nc, planOf('2027-01-20', ['NC', 'L', 'R', '0530']), '2027-01').filter((i) => i.pid === 'a');
+  assert.ok(!good.some((i) => i.level === 'fehler' && i.date >= '2027-01-20' && i.date <= '2027-01-23'), JSON.stringify(good));
+  assert.ok(has(R.validate(no, planOf('2027-01-20', ['NC', 'L', 'R']), '2027-01').filter((i) => i.pid === 'a'), 'AIRAC', 'fehler'));
+  assert.ok(has(R.validate(nc, planOf('2027-01-13', ['NC', 'L', 'R']), '2027-01').filter((i) => i.pid === 'a'), 'AIRAC', 'fehler'));
+  assert.ok(has(R.validate(nc, planOf('2027-01-20', ['NC', '0730']), '2027-01').filter((i) => i.pid === 'a'), 'Nachtblock', 'fehler'));
+  assert.ok(has(R.validate(nc, planOf('2027-01-20', ['NC', 'L', '0730']), '2027-01').filter((i) => i.pid === 'a'), 'Nachtblock', 'fehler'));
+  assert.ok(R.validate(nc, planOf('2027-01-10', ['R']), '2027-01').some((i) => i.rule === 'AIRAC' && i.date === '2027-01-20' && !i.pid));
+});
+
 test('Dauer und Zeitzuschlag der Schichten', () => {
   const near = (a, b) => assert.ok(Math.abs(a - b) < 0.001, `${a} != ${b}`);
   near(R.creditedHours('0730'), 8.2);
@@ -27,6 +48,7 @@ test('Dauer und Zeitzuschlag der Schichten', () => {
   near(R.creditedHours('1600'), 8.2 + 40 / 60);
   near(R.creditedHours('N1'), 10 + 100 / 60);
   near(R.creditedHours('N2'), 10 + 85 / 60);
+  near(R.creditedHours('NC'), 10 + 100 / 60);
   near(R.creditedHours('L'), 0);
 });
 
@@ -39,8 +61,9 @@ test('Ferienanspruch nach Alter', () => {
 });
 
 test('Jahresziel R-Tage', () => {
-  assert.equal(R.yearTargetR(P('a'), 2027), 117);
-  assert.ok(Math.abs(R.yearTargetR(P('a', 80), 2027) - 166.6) < 0.001);
+  assert.equal(R.yearTargetR(P('a')), 117);
+  assert.ok(Math.abs(R.yearTargetR(P('a', 80)) - 161) < 0.001);
+  assert.ok(Math.abs(R.yearTargetR(P('a', 90)) - 139) < 0.001);
 });
 
 test('Drei erste Mittwoche', () => {
@@ -83,6 +106,13 @@ test('Nachtblock: N1 ohne 1600 ist verboten', () => {
   assert.ok(has(rulesFor(planOf('2027-01-11', ['0730', 'N1']), '2027-01'), 'Nachtblock', 'fehler'));
 });
 
+test('NC: Ferientag zählt nach Pensum, NC zählt als Nachtarbeit', () => {
+  const plan = planOf('2027-01-11', ['F']);
+  assert.ok(Math.abs(R.account(P('a', 80), plan, 2027).hours - 6.56) < 0.001);
+  assert.ok(Math.abs(R.account(P('a'), plan, 2027).hours - 8.2) < 0.001);
+  assert.equal(R.isFreeSunday(planOf('2027-01-16', ['NC', 'R']), 'a', '2027-01-17'), false);
+});
+
 test('Mehr als 7 Arbeitstage in Folge', () => {
   const issues = rulesFor(planOf('2027-01-11', Array(8).fill('0730')), '2027-01');
   assert.ok(has(issues, 'Arbeitstage in Folge', 'fehler'));
@@ -114,6 +144,7 @@ const team = Array.from({ length: 24 }, (_, i) => P(`p${String(i + 1).padStart(2
 team[22].pensum = 80; team[22].birthYear = 1964;
 team[23].pensum = 90; team[23].birthYear = 1977;
 team[20].birthYear = 1968; team[21].birthYear = 1969;
+team.slice(0, 6).forEach((p) => { p.nc = true; });
 
 const addVacation = (plan) => {
   // Jede Person bekommt ihren Anspruch in Wochen zu 5 Tagen über das Jahr verteilt.
@@ -149,7 +180,7 @@ test('Ganzes Jahr: alle Regeln eingehalten', () => {
     const k = R.account(p, plan, 2027);
     return {
       p: p.id, pens: p.pensum, R: k.counts.R, ziel: +k.targetR.toFixed(1), F: k.counts.F, So: k.freeSundays,
-      Bl: k.nightBlocks, L: k.counts.L, B: k.counts.B, I: k.counts.I, a: k.counts['0530'], b: k.counts['0730'],
+      Bl: k.nightBlocks, NC: k.counts.NC, L: k.counts.L, B: k.counts.B, I: k.counts.I, a: k.counts['0530'], b: k.counts['0730'],
       c: k.counts['0930'], d: k.counts['1400'], we: k.workedWeekendDays, saldo: +k.saldo.toFixed(1), tage: k.plannedDays,
     };
   });
@@ -159,6 +190,14 @@ test('Ganzes Jahr: alle Regeln eingehalten', () => {
   warnings.slice(0, 10).forEach((w) => console.log(`  W ${w}`));
   for (const d of R.monthDates('2027-03')) {
     for (const s of R.SHIFTS) assert.equal(team.filter((p) => R.getCode(plan, p.id, d) === s).length, 1, `${d} ${s}`);
+  }
+  const airacs = R.yearMonths(2027).flatMap(R.monthDates).filter(R.isAirac);
+  assert.equal(airacs.length, 13);
+  for (const d of airacs) {
+    const holders = team.filter((p) => R.getCode(plan, p.id, d) === 'NC');
+    assert.equal(holders.length, 1, d);
+    assert.ok(holders[0].nc, d);
+    assert.equal(R.getCode(plan, holders[0].id, R.addDays(d, 1)), 'L', d);
   }
   assert.equal(errors.length, 0);
 });
@@ -170,6 +209,81 @@ test('Fixierte Einträge bleiben beim Erzeugen erhalten', () => {
   const out = Solver.generate(team, plan, '2027-02', { timeMs: 100 }).plan;
   assert.equal(R.getCode(out, 'p05', '2027-02-10'), 'F');
   assert.equal(R.getCode(out, 'p06', '2027-02-11'), '0930');
+});
+
+test('Wunsch: frei zählt auch als erfüllt bei Ferien und Leave', () => {
+  const plan = {};
+  R.setCode(plan, 'p01', '2027-03-02', 'F');
+  R.setCode(plan, 'p02', '2027-03-02', '0530');
+  const wishes = { p01: { '2027-03-02': 'R' }, p02: { '2027-03-02': 'R' } };
+  const results = R.wishResults(team, wishes, plan, '2027-03');
+  assert.equal(results.find((r) => r.pid === 'p01').ok, true);
+  assert.equal(results.find((r) => r.pid === 'p02').ok, false);
+});
+
+test('Wunsch: wird beim Erzeugen berücksichtigt', () => {
+  const wishes = { p03: { '2027-02-09': 'R', '2027-02-16': '0730', '2027-02-23': 'B' }, p04: { '2027-02-10': '1600' } };
+  const { plan } = Solver.generate(team, {}, '2027-02', { timeMs: 300, wishes });
+  assert.equal(R.getCode(plan, 'p03', '2027-02-09'), 'R');
+  assert.equal(R.getCode(plan, 'p03', '2027-02-16'), '0730');
+  assert.equal(R.getCode(plan, 'p03', '2027-02-23'), 'B');
+  assert.equal(R.getCode(plan, 'p04', '2027-02-10'), '1600');
+  assert.equal(R.getCode(plan, 'p04', '2027-02-11'), 'N1');
+});
+
+test('Wunsch: Vorrang für weniger erfüllte Wünsche', () => {
+  // p01 bekam im Februar drei Wünsche erfüllt, p02 keinen. Beide wollen dieselbe Schicht.
+  const plan = {};
+  const wishes = { p01: { '2027-03-09': '0530' }, p02: { '2027-03-09': '0530' } };
+  for (const d of ['2027-02-02', '2027-02-09', '2027-02-16']) {
+    R.setCode(plan, 'p01', d, 'R');
+    wishes.p01[d] = 'R';
+  }
+  const out = Solver.generate(team, plan, '2027-03', { timeMs: 300, wishes }).plan;
+  assert.equal(R.getCode(out, 'p02', '2027-03-09'), '0530');
+  assert.notEqual(R.getCode(out, 'p01', '2027-03-09'), '0530');
+});
+
+test('Wunsch: bricht keine Regel, auch wenn er unmöglich ist', () => {
+  const wishes = { p05: { '2027-02-10': '1400', '2027-02-11': '0530', '2027-02-13': 'B' } };
+  const { plan, issues } = Solver.generate(team, {}, '2027-02', { timeMs: 300, wishes });
+  assert.equal(issues.filter((i) => i.level === 'fehler').length, 0);
+  assert.notEqual(R.getCode(plan, 'p05', '2027-02-13'), 'B');
+  assert.ok(!(R.getCode(plan, 'p05', '2027-02-10') === '1400' && R.getCode(plan, 'p05', '2027-02-11') === '0530'));
+});
+
+test('Ganzes Jahr mit 5 Wünschen pro Person und Monat', () => {
+  let seed = 12345;
+  const next = (n) => {
+    seed = (seed * 1103515245 + 12345) % 2147483648;
+    return seed % n;
+  };
+  let plan = {};
+  addVacation(plan);
+  const wishes = {};
+  const errors = [];
+  let total = 0;
+  let met = 0;
+  for (const ym of R.yearMonths(2027)) {
+    const days = R.monthDates(ym);
+    for (const p of team) {
+      wishes[p.id] ??= {};
+      for (let i = 0; i < R.MAX_WISHES_PER_MONTH; i++) {
+        const c = next(100) < 70 ? 'R' : R.WISH_CODES[next(R.WISH_CODES.length)];
+        wishes[p.id][days[next(days.length)]] = c;
+      }
+    }
+    const result = Solver.generate(team, plan, ym, { timeMs: Number(process.env.SIM_MS ?? 500), wishes });
+    plan = result.plan;
+    errors.push(...result.issues.filter((i) => i.level === 'fehler').map((i) => `${ym} ${i.msg}`));
+    const r = R.wishResults(team, wishes, plan, ym);
+    total += r.length;
+    met += r.filter((x) => x.ok).length;
+  }
+  const perPerson = team.map((p) => R.yearMonths(2027).flatMap((m) => R.wishResults([p], wishes, plan, m)).filter((x) => x.ok).length);
+  console.log(`Wünsche erfüllt: ${met} von ${total} (${Math.round((met / total) * 100)} %), pro Person ${Math.min(...perPerson)} bis ${Math.max(...perPerson)}`);
+  errors.slice(0, 15).forEach((e) => console.log(`  F ${e}`));
+  assert.equal(errors.length, 0);
 });
 
 console.log(`\n${passed} Tests bestanden`);

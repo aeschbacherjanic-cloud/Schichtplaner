@@ -11,7 +11,8 @@ Personen, Ferien und Pläne liegen nur im Browser (`localStorage`), nicht in die
 1. Unter **Personen und Ferien** Namen, Pensum und Jahrgang erfassen und die Ferien eintragen.
 2. Unter **Plan** den Monat wählen und **Plan erzeugen** klicken.
 3. Einzelne Tage durch Anklicken ändern. Von Hand gesetzte Einträge sind fixiert und bleiben beim nächsten Erzeugen erhalten.
-4. Die Prüfung unter dem Plan zeigt Regelverstösse sofort an. Das **Jahreskonto** zeigt die Kontingente und den Stundensaldo.
+4. Wünsche werden im selben Menü wie die Tage erfasst, höchstens 5 pro Person und Monat. Sie sind unverbindlich: GAV und Besetzung gehen vor, und wer im Jahr bisher weniger erfüllte Wünsche hat, kommt zuerst dran.
+5. Die Prüfung unter dem Plan zeigt Regelverstösse sofort an. Das **Jahreskonto** zeigt die Kontingente und den Stundensaldo.
 
 Monate am besten der Reihe nach planen, weil laufende Nachtblöcke und Kontingente aus dem Vormonat übernommen werden.
 
@@ -20,6 +21,7 @@ Umgesetzt in `src/rules.js`, Grundlage ist der GAV AOT vom 1. Januar 2025, Anhan
 
 - Jede Schicht (0530, 0730, 0930, 1400, 1600, N1, N2) ist jeden Tag von genau einer Person besetzt.
 - Nachtblock immer als 1600, N1, N2, Leave, danach R-Tag oder Ferien. Leave zählt nicht zu den R-Tagen.
+- AIRAC alle 28 Tage an einem Mittwoch (ab 25.11.2026): zusätzlich die Schicht NC, nur für festgelegte Personen, gefolgt von Leave und R-Tag oder Ferien.
 - 11 h Ruhe vor jeder Schicht und 24 h pro R-Tag plus 11 h bei arbeitsfreien Tagen.
 - Höchstens 7 Arbeitstage in Folge, ein freier Tag pro Kalenderwoche, mindestens 8 R-Tage pro Monat und 117 pro Jahr.
 - Höchstens 14 Nachtarbeiten in 28 Tagen, 30 freie Sonntage pro Jahr, ein freier Sonntag pro 28 Tage.

@@ -11,6 +11,8 @@
     const persons = Array.from({ length: 24 }, (_, i) => ({
       id: `p${i + 1}`, name: `Person ${String(i + 1).padStart(2, '0')}`, pensum: 100, birthYear: 1985,
     }));
+    for (const p of persons) p.nc = false;
+    for (const p of persons.slice(0, 6)) p.nc = true;
     persons[20].birthYear = 1968;
     persons[21].birthYear = 1968;
     Object.assign(persons[22], { pensum: 80, birthYear: 1964 });
@@ -28,6 +30,7 @@
     return { persons: samplePersons(), plan: {}, month: '2027-01', tab: 'plan' };
   };
   const state = load();
+  state.wishes ??= {};
   const save = () => {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
@@ -64,6 +67,7 @@
     const dates = R.monthDates(ym);
     const termine = R.instructionDates(ym);
     const issues = R.validate(state.persons, state.plan, ym);
+    const results = R.wishResults(state.persons, state.wishes, state.plan, ym);
     $('month-label').textContent = monthName(ym);
 
     const marks = {};
@@ -76,9 +80,10 @@
     const head = el('tr', {}, el('th', { class: 'name', text: 'Person' }));
     for (const d of dates) {
       const isTermin = termine.includes(d);
-      const th = el('th', { class: `${R.isWeekend(d) ? 'we' : ''} ${isTermin ? 'termin' : ''}`.trim() }, d.slice(8));
-      th.append(el('small', { text: isTermin ? 'Mi·I' : DAYS[R.weekday(d)] }));
-      if (isTermin) th.title = 'Instruktionstermin';
+      const airac = R.isAirac(d);
+      const th = el('th', { class: `${R.isWeekend(d) ? 'we' : ''} ${isTermin || airac ? 'termin' : ''}`.trim() }, d.slice(8));
+      th.append(el('small', { text: `${isTermin ? 'I' : 'Mi'}${airac ? '·A' : isTermin ? '·Mi' : ''}`.replace(/^Mi$/, DAYS[R.weekday(d)]) }));
+      th.title = [isTermin && 'Instruktionstermin', airac && 'AIRAC: Schicht NC'].filter(Boolean).join(', ');
       head.append(th);
     }
 
@@ -88,14 +93,18 @@
       for (const d of dates) {
         const c = R.getCode(state.plan, p.id, d);
         const mark = marks[`${p.id}|${d}`];
+        const wish = state.wishes[p.id]?.[d];
         const classes = ['cell'];
         if (c) classes.push(`c-${c}`);
+        if (wish) classes.push(c ? (results.find((r) => r.pid === p.id && r.date === d).ok ? 'wish-ok' : 'wish-no') : 'wish-open');
         if (R.isPinned(state.plan, p.id, d)) classes.push('pinned');
         if (mark) classes.push(`has-${mark}`);
         const button = el('button', {
           class: classes.join(' '), type: 'button', 'data-pid': p.id, 'data-date': d,
-          text: c ? shortOf(c) : '', 'aria-label': `${p.name}, ${R.fmtDate(d)}: ${c ? R.CODES[c].label : 'leer'}`,
+          text: c ? shortOf(c) : (wish ? `${shortOf(wish)}?` : ''),
+          'aria-label': `${p.name}, ${R.fmtDate(d)}: ${c ? R.CODES[c].label : 'leer'}${wish ? `, Wunsch ${R.wishLabel(wish)}` : ''}`,
         });
+        if (wish) button.title = `Wunsch: ${R.wishLabel(wish)}`;
         row.append(el('td', { class: R.isWeekend(d) ? 'we' : '' }, button));
       }
       body.append(row);
@@ -122,7 +131,19 @@
     if (counts.fehler) pills.push(el('span', { class: 'pill fehler', text: `${counts.fehler} Fehler` }));
     if (counts.warnung) pills.push(el('span', { class: 'pill warnung', text: `${counts.warnung} Warnungen` }));
     if (counts.hinweis) pills.push(el('span', { class: 'pill hinweis', text: `${counts.hinweis} Hinweise` }));
+    const decided = results.filter((r) => r.actual);
+    if (decided.length) pills.push(el('span', { class: 'pill wish', text: `Wünsche: ${decided.filter((r) => r.ok).length} von ${decided.length} erfüllt` }));
+    else if (results.length) pills.push(el('span', { class: 'pill wish', text: `${results.length} Wünsche erfasst` }));
     $('summary').replaceChildren(...pills);
+
+    const unmet = decided.filter((r) => !r.ok);
+    $('wishes').replaceChildren(...(unmet.length ? [el(
+      'div', { class: 'issue-group' },
+      el('h2', { text: 'Nicht erfüllte Wünsche' }),
+      el('ul', {}, ...unmet.map((r) => el('li', {
+        text: `${r.name}, ${R.fmtDate(r.date)}: ${R.wishLabel(r.code)} gewünscht, eingeteilt ${R.CODES[r.actual].label}.`,
+      }))),
+    )] : []));
 
     const groups = [['fehler', 'Fehler'], ['warnung', 'Warnungen'], ['hinweis', 'Hinweise']];
     $('issues').replaceChildren(...groups.filter(([level]) => counts[level]).map(([level, title]) => el(
@@ -136,21 +157,24 @@
     const items = R.CODE_ORDER.map((c) => el('span', {
       class: `c-${c}`, text: c === 'R' || SHORT[c] ? `${shortOf(c)} = ${R.CODES[c].label}` : c,
     }));
-    $('legend').replaceChildren(...items, el('em', { text: 'Punkt in der Ecke = fixiert, bleibt beim Erzeugen erhalten. Mi·I = Instruktionstermin.' }));
+    $('legend').replaceChildren(...items, el('em', { text: 'Punkt = fixiert. Dreieck = Wunsch: grün erfüllt, rot nicht erfüllt, blau noch offen. I·Mi = Instruktionstermin, Mi·A = AIRAC mit Schicht NC.' }));
   }
 
   function renderKonto() {
     const year = Number(state.month.slice(0, 4));
     $('konto-year').textContent = `Jahr ${year}`;
-    const columns = ['Person', 'Pensum', 'Tage geplant', 'R-Tage', 'Jahresziel R', 'Ferien', 'Anspruch', 'Freie Sonntage', 'Nachtblöcke', 'Leave', 'Büro', 'Instruktion', '0530', '0730', '0930', '1400', 'Weekend-Einsätze', 'Saldo h'];
+    const columns = ['Person', 'Pensum', 'Tage geplant', 'R-Tage', 'Jahresziel R', 'Ferien', 'Anspruch', 'Freie Sonntage', 'Nachtblöcke', 'NC', 'Leave', 'Büro', 'Instruktion', '0530', '0730', '0930', '1400', 'Weekend-Einsätze', 'Saldo h', 'Wünsche erfüllt'];
     const head = el('tr', {}, ...columns.map((text) => el('th', { text })));
     const rows = state.persons.map((p) => {
       const k = R.account(p, state.plan, year);
+      const wishResults = R.yearMonths(year)
+        .flatMap((m) => R.wishResults([p], state.wishes, state.plan, m))
+        .filter((r) => r.actual);
       const cells = [
         p.name, `${p.pensum} %`, k.plannedDays, k.counts.R, k.targetR.toFixed(1).replace(/\.0$/, ''),
-        k.counts.F, k.vacationEntitlement, k.freeSundays, k.nightBlocks, k.counts.L, k.counts.B, k.counts.I,
+        k.counts.F, k.vacationEntitlement, k.freeSundays, k.nightBlocks, k.counts.NC, k.counts.L, k.counts.B, k.counts.I,
         k.counts['0530'], k.counts['0730'], k.counts['0930'], k.counts['1400'], k.workedWeekendDays,
-        k.saldo.toFixed(1),
+        k.saldo.toFixed(1), `${wishResults.filter((r) => r.ok).length} / ${wishResults.length}`,
       ].map((text) => el('td', { text }));
       if (k.counts.F > k.vacationEntitlement) cells[5].classList.add('bad');
       return el('tr', {}, ...cells);
@@ -161,15 +185,18 @@
   function renderPersonen() {
     const year = Number(state.month.slice(0, 4));
     $('ferien-person').replaceChildren(...state.persons.map((p) => el('option', { value: p.id, text: p.name })));
-    const head = el('tr', {}, ...['Name', 'Pensum %', 'Jahrgang', `Ferien ${year}`, ''].map((text) => el('th', { text })));
+    const head = el('tr', {}, ...['Name', 'Pensum %', 'Jahrgang', 'Darf NC', `Ferien ${year}`, ''].map((text) => el('th', { text })));
     const rows = state.persons.map((p) => {
       const input = (field, type, attrs = {}) => el('input', { type, value: p[field], 'data-pid': p.id, 'data-field': field, 'aria-label': `${field} von ${p.name}`, ...attrs });
+      const nc = el('input', { type: 'checkbox', 'data-pid': p.id, 'data-field': 'nc', 'aria-label': `${p.name} darf NC` });
+      nc.checked = !!p.nc;
       const remove = el('button', { type: 'button', 'data-remove': p.id, text: 'Entfernen', 'aria-label': `${p.name} entfernen` });
       return el(
         'tr', {},
         el('td', {}, input('name', 'text')),
         el('td', {}, input('pensum', 'number', { min: 10, max: 100, step: 5 })),
         el('td', {}, input('birthYear', 'number', { min: 1940, max: 2015 })),
+        el('td', {}, nc),
         el('td', { text: R.vacationDays(p.birthYear, year) }),
         el('td', {}, remove),
       );
@@ -221,7 +248,34 @@
       closePicker();
       renderPlan();
     });
-    picker.replaceChildren(el('div', { class: 'title', text: `${person.name}, ${DAYS[R.weekday(date)]} ${R.fmtDate(date)}` }), ...entries, release, clear);
+    const ym = date.slice(0, 7);
+    const used = R.wishesInMonth(state.wishes, pid, ym).length;
+    const current = state.wishes[pid]?.[date];
+    const full = used >= R.MAX_WISHES_PER_MONTH && !current;
+    const setWish = (c) => {
+      state.wishes[pid] ??= {};
+      if (c) state.wishes[pid][date] = c;
+      else delete state.wishes[pid][date];
+      save();
+      closePicker();
+      renderPlan();
+    };
+    const wishButtons = R.WISH_CODES.map((c) => {
+      const label = c === '1600' ? 'Block' : R.wishLabel(c);
+      const b = el('button', { type: 'button', class: `wish-choice${current === c ? ' chosen' : ''}`, text: label, 'aria-label': `Wunsch ${R.wishLabel(c)}` });
+      if (c === '1600') b.title = 'Nachtblock ab diesem Tag';
+      b.disabled = full;
+      b.addEventListener('click', () => setWish(c));
+      return b;
+    });
+    const clearWish = el('button', { type: 'button', class: 'wish-choice', text: 'Löschen', 'aria-label': 'Wunsch löschen' });
+    clearWish.disabled = !current;
+    clearWish.addEventListener('click', () => setWish(null));
+    const wishTitle = el('div', { class: 'title', text: `Wunsch (${used} von ${R.MAX_WISHES_PER_MONTH} in diesem Monat, unverbindlich)` });
+    picker.replaceChildren(
+      el('div', { class: 'title', text: `${person.name}, ${DAYS[R.weekday(date)]} ${R.fmtDate(date)}` }),
+      ...entries, release, clear, wishTitle, ...wishButtons, clearWish,
+    );
     picker.hidden = false;
     pickerTarget = button;
     const rect = button.getBoundingClientRect();
@@ -264,7 +318,7 @@
     $('status').textContent = 'Rechne …';
     $('btn-generate').disabled = true;
     setTimeout(() => {
-      const result = Solver.generate(state.persons, state.plan, ym, { timeMs: 2500, seed: Date.now() % 100000 });
+      const result = Solver.generate(state.persons, state.plan, ym, { timeMs: 2500, seed: Date.now() % 100000, wishes: state.wishes });
       state.plan = result.plan;
       save();
       $('btn-generate').disabled = false;
@@ -308,7 +362,7 @@
     try {
       const data = JSON.parse(await file.text());
       if (!Array.isArray(data.persons) || typeof data.plan !== 'object') throw new Error('Format');
-      Object.assign(state, data);
+      Object.assign(state, { wishes: {} }, data);
       save();
       render();
     } catch {
@@ -320,7 +374,9 @@
     const { pid, field } = e.target.dataset;
     if (!pid) return;
     const person = state.persons.find((p) => p.id === pid);
-    if (field === 'name') {
+    if (field === 'nc') {
+      person.nc = e.target.checked;
+    } else if (field === 'name') {
       person.name = e.target.value.trim() || person.name;
     } else {
       const value = Number(e.target.value);
@@ -336,12 +392,13 @@
     if (!confirm(`${person.name} und alle Einträge dieser Person löschen?`)) return;
     state.persons = state.persons.filter((p) => p.id !== pid);
     delete state.plan[pid];
+    delete state.wishes[pid];
     save();
     renderPersonen();
   });
   $('btn-add-person').addEventListener('click', () => {
     const next = Math.max(0, ...state.persons.map((p) => Number(p.id.slice(1)) || 0)) + 1;
-    state.persons.push({ id: `p${next}`, name: `Person ${String(next).padStart(2, '0')}`, pensum: 100, birthYear: 1985 });
+    state.persons.push({ id: `p${next}`, name: `Person ${String(next).padStart(2, '0')}`, pensum: 100, birthYear: 1985, nc: false });
     save();
     renderPersonen();
   });

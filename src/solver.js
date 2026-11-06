@@ -27,7 +27,7 @@ const Solver = (() => {
     return copy;
   };
 
-  const attempt = (persons, basePlan, ym, seed) => {
+  const attempt = (persons, basePlan, ym, seed, wishes, fulfilledBefore, skipChance) => {
     const random = makeRandom(seed);
     const dates = R.monthDates(ym);
     const year = Number(ym.slice(0, 4));
@@ -53,24 +53,84 @@ const Solver = (() => {
     };
     completeBlocks();
 
-    // Instruktion: gleichmässig auf die drei Mittwoche verteilen
-    const termine = R.instructionDates(ym);
-    for (const p of shuffled()) {
-      if (dates.some((d) => code(p.id, d) === 'I')) continue;
-      const options = termine
-        .filter((d) => !code(p.id, d))
-        .map((d) => [persons.filter((q) => code(q.id, d) === 'I').length + random() / 2, d])
-        .sort((a, b) => a[0] - b[0]);
-      if (options.length) set(p.id, options[0][1], 'I');
-    }
+    // Prüft einen Einsatz gegen den letzten Einsatz davor und den nächsten danach.
+    const restOk = (pid, d, c, minRest) => {
+      const check = (a, codeA, b, codeB, rDays, offset) => {
+        const rest = offset * 1440 + R.CODES[codeB].start - R.CODES[codeA].end;
+        return rest >= (rDays > 0 ? R.requiredRest(rDays) : minRest);
+      };
+      let rDays = 0;
+      for (let i = 1; i <= 14; i++) {
+        const prev = code(pid, R.addDays(d, -i));
+        if (prev === null) break;
+        if (prev === 'R') rDays++;
+        else if (R.WORK.has(prev)) {
+          if (!check(null, prev, null, c, rDays, i)) return false;
+          break;
+        }
+      }
+      // Noch leere Tage in den nächsten 3 Tagen könnten R-Tage werden und zählen darum schon mit.
+      rDays = 0;
+      for (let i = 1; i <= 14; i++) {
+        const next = code(pid, R.addDays(d, i));
+        if (next === null && i > 3) break;
+        if (next === null || next === 'R') rDays++;
+        else if (R.WORK.has(next)) {
+          if (!check(null, c, null, next, rDays, i)) return false;
+          break;
+        }
+      }
+      return true;
+    };
 
-    // Nachtblöcke: jeden Tag beginnt einer. Fehlt der Vormonat, wird der laufende Block am Monatsanfang ergänzt.
+    // Ein Nachtblock über das Monatsende zählt schon mit, auch wenn der Folgemonat noch leer ist.
+    const lastDate = dates[dates.length - 1];
+    const codeWithBlock = (pid, d) => {
+      const c = code(pid, d);
+      if (c !== null || d <= lastDate) return c;
+      let current = code(pid, lastDate);
+      for (let x = lastDate; x < d; x = R.addDays(x, 1)) current = R.NEXT_IN_BLOCK[current] ?? null;
+      return current;
+    };
+    const runWith = (pid, d) => {
+      let run = 1;
+      for (let i = 1; R.WORK.has(code(pid, R.addDays(d, -i))); i++) run++;
+      for (let i = 1; R.WORK.has(codeWithBlock(pid, R.addDays(d, i))); i++) run++;
+      return run;
+    };
+    const wouldFillWeek = (pid, d) => {
+      const monday = R.mondayOf(d);
+      return Array.from({ length: 7 }, (_, i) => R.addDays(monday, i)).every((x) => x === d || R.WORK.has(codeWithBlock(pid, x)));
+    };
+    const missedSundays = (pid, d) =>
+      [7, 14, 21].every((n) => {
+        const s = R.addDays(d, -n);
+        return code(pid, s) && !R.isFreeSunday(plan, pid, s);
+      });
+    const canWork = (pid, d, c, tier) => {
+      if (code(pid, d) !== null || !restOk(pid, d, c, tier.minRest)) return false;
+      if (runWith(pid, d) > tier.maxRun || wouldFillWeek(pid, d)) return false;
+      if (tier.protectSunday && R.isSunday(d) && missedSundays(pid, d)) return false;
+      return true;
+    };
+
     const blockSteps = ['1600', 'N1', 'N2', 'L', 'R'];
-    const canBlock = (pid, d, from) =>
-      blockSteps.slice(from).every((step, i) => {
+    const canBlock = (pid, d, from) => {
+      const free = blockSteps.slice(from).every((step, i) => {
         const c = code(pid, R.addDays(d, i));
         return c === null || (step === 'R' && c === 'F') || c === step;
       });
+      if (!free) return false;
+      const workDays = blockSteps.slice(from).filter((step) => R.WORK.has(step)).map((_, i) => R.addDays(d, i));
+      let run = workDays.length;
+      for (let i = 1; R.WORK.has(code(pid, R.addDays(d, -i))); i++) run++;
+      if (run > 7) return false;
+      return !workDays.some((x) => {
+        const monday = R.mondayOf(x);
+        return Array.from({ length: 7 }, (_, i) => R.addDays(monday, i))
+          .every((y) => workDays.includes(y) || R.WORK.has(code(pid, y)));
+      });
+    };
     const placeBlock = (pid, d, from) => {
       blockSteps.slice(from).forEach((step, i) => {
         const day = R.addDays(d, i);
@@ -94,6 +154,69 @@ const Solver = (() => {
       return best;
     };
     const holder = (d, c) => persons.find((p) => code(p.id, d) === c);
+    const termine = R.instructionDates(ym);
+
+    // AIRAC: NC ist Pflicht und nur wenige dürfen sie, darum vor den Wünschen besetzen.
+    for (const d of dates.filter(R.isAirac)) {
+      if (holder(d, 'NC')) continue;
+      const free = (pid) => {
+        const next = code(pid, R.addDays(d, 1));
+        const after = code(pid, R.addDays(d, 2));
+        return (next === null || next === 'L') && (after === null || after === 'R' || after === 'F');
+      };
+      const options = persons
+        .filter((p) => p.nc && free(p.id) && canWork(p.id, d, 'NC', TIERS[2]))
+        .map((p) => [(usage[p.id].NC + 1) / (p.pensum / 100) + random() * 0.5, p])
+        .sort((a, b) => a[0] - b[0]);
+      if (options.length) {
+        const pid = options[0][1].id;
+        set(pid, d, 'NC');
+        usage[pid].NC++;
+        completeBlocks();
+      }
+    }
+
+    // Wünsche zuerst setzen: Wer bisher weniger erfüllt bekam, kommt zuerst dran.
+    const wished = new Set();
+    const isWished = (pid, d) => wished.has(`${pid}|${d}`);
+    const wishList = persons
+      .flatMap((p) => R.wishesInMonth(wishes, p.id, ym).map((d) => ({ pid: p.id, d, c: wishes[p.id][d] })))
+      .map((w) => [fulfilledBefore[w.pid] + random() * 0.5, w])
+      .sort((a, b) => a[0] - b[0])
+      .map((x) => x[1]);
+    for (const { pid, d, c } of wishList) {
+      if (random() < skipChance || code(pid, d) !== null) continue;
+      const occupied = c === '1600' ? [0, 1, 2, 3, 4].map((n) => R.addDays(d, n)) : [d];
+      const hasInstruction = dates.some((x) => code(pid, x) === 'I');
+      if (!hasInstruction && !termine.some((x) => !occupied.includes(x) && !code(pid, x))) continue;
+      if (c === 'R') {
+        set(pid, d, 'R');
+      } else if (c === '1600') {
+        if (holder(d, '1600') || !canBlock(pid, d, 0)) continue;
+        placeBlock(pid, d, 0);
+      } else if (c === 'B') {
+        if (R.isWeekend(d) || !canWork(pid, d, 'B', TIERS[0])) continue;
+        set(pid, d, 'B');
+      } else {
+        if (holder(d, c) || !canWork(pid, d, c, TIERS[0])) continue;
+        set(pid, d, c);
+        usage[pid][c]++;
+        if (R.isWeekend(d)) usage[pid].weekend++;
+      }
+      wished.add(`${pid}|${d}`);
+    }
+
+    // Instruktion: gleichmässig auf die drei Mittwoche verteilen
+    for (const p of shuffled()) {
+      if (dates.some((d) => code(p.id, d) === 'I')) continue;
+      const options = termine
+        .filter((d) => !code(p.id, d))
+        .map((d) => [persons.filter((q) => code(q.id, d) === 'I').length * 1.5 + persons.filter((q) => code(q.id, d)).length * 0.5 + random() / 2, d])
+        .sort((a, b) => a[0] - b[0]);
+      if (options.length) set(p.id, options[0][1], 'I');
+    }
+
+    // Nachtblöcke: jeden Tag beginnt einer. Fehlt der Vormonat, wird der laufende Block am Monatsanfang ergänzt.
     if (!holder(dates[0], 'N2')) {
       const p = chooseForBlock(dates[0], 2);
       if (p) placeBlock(p.id, dates[0], 2);
@@ -107,57 +230,6 @@ const Solver = (() => {
       const p = chooseForBlock(d, 0);
       if (p) placeBlock(p.id, d, 0);
     }
-
-    // Prüft einen Einsatz gegen den letzten Einsatz davor und den nächsten danach.
-    const restOk = (pid, d, c, minRest) => {
-      const check = (a, codeA, b, codeB, rDays, offset) => {
-        const rest = offset * 1440 + R.CODES[codeB].start - R.CODES[codeA].end;
-        return rest >= (rDays > 0 ? R.requiredRest(rDays) : minRest);
-      };
-      let rDays = 0;
-      for (let i = 1; i <= 14; i++) {
-        const prev = code(pid, R.addDays(d, -i));
-        if (prev === null) break;
-        if (prev === 'R') rDays++;
-        else if (R.WORK.has(prev)) {
-          if (!check(null, prev, null, c, rDays, i)) return false;
-          break;
-        }
-      }
-      rDays = 0;
-      for (let i = 1; i <= 14; i++) {
-        const next = code(pid, R.addDays(d, i));
-        if (next === null) break;
-        if (next === 'R') rDays++;
-        else if (R.WORK.has(next)) {
-          if (!check(null, c, null, next, rDays, i)) return false;
-          break;
-        }
-      }
-      return true;
-    };
-
-    const runWith = (pid, d) => {
-      let run = 1;
-      for (let i = 1; R.WORK.has(code(pid, R.addDays(d, -i))); i++) run++;
-      for (let i = 1; R.WORK.has(code(pid, R.addDays(d, i))); i++) run++;
-      return run;
-    };
-    const wouldFillWeek = (pid, d) => {
-      const monday = R.mondayOf(d);
-      return Array.from({ length: 7 }, (_, i) => R.addDays(monday, i)).every((x) => x === d || R.WORK.has(code(pid, x)));
-    };
-    const missedSundays = (pid, d) =>
-      [7, 14, 21].every((n) => {
-        const s = R.addDays(d, -n);
-        return code(pid, s) && !R.isFreeSunday(plan, pid, s);
-      });
-    const canWork = (pid, d, c, tier) => {
-      if (code(pid, d) !== null || !restOk(pid, d, c, tier.minRest)) return false;
-      if (runWith(pid, d) > tier.maxRun || wouldFillWeek(pid, d)) return false;
-      if (tier.protectSunday && R.isSunday(d) && missedSundays(pid, d)) return false;
-      return true;
-    };
 
     // Tag für Tag die Tagschichten besetzen
     for (const d of dates) {
@@ -185,6 +257,23 @@ const Solver = (() => {
             if (R.isWeekend(d)) usage[best.id].weekend++;
             break;
           }
+        }
+      }
+      // Besetzung geht vor: Bleibt eine Schicht offen, wird ein Wunsch auf frei oder Büro zurückgenommen.
+      for (const s of DAY_SHIFTS) {
+        if (holder(d, s)) continue;
+        for (const p of shuffled()) {
+          const before = code(p.id, d);
+          if (!isWished(p.id, d) || (before !== 'R' && before !== 'B')) continue;
+          set(p.id, d, null);
+          if (canWork(p.id, d, s, TIERS[2])) {
+            set(p.id, d, s);
+            wished.delete(`${p.id}|${d}`);
+            usage[p.id][s]++;
+            if (R.isWeekend(d)) usage[p.id].weekend++;
+            break;
+          }
+          set(p.id, d, before);
         }
       }
       // Wer übrig bleibt: am Wochenende R-Tag, sonst Büro oder R-Tag, wenn Büro nicht geht
@@ -233,7 +322,7 @@ const Solver = (() => {
       let missing = R.monthTargetR(p, plan, ym) - dates.filter((d) => code(p.id, d) === 'R').length;
       while (missing > 0) {
         const options = dates
-          .filter((d) => code(p.id, d) === 'B' && !R.isPinned(plan, p.id, d) && stillLegalAsR(p.id, d))
+          .filter((d) => code(p.id, d) === 'B' && !R.isPinned(plan, p.id, d) && !isWished(p.id, d) && stillLegalAsR(p.id, d))
           .map((d) => [longestRunAround(p.id, d) + random() * 1.5, d])
           .sort((a, b) => b[0] - a[0]);
         if (!options.length) break;
@@ -242,7 +331,7 @@ const Solver = (() => {
       }
       while (missing < 0) {
         const options = dates
-          .filter((d) => code(p.id, d) === 'R' && !R.isPinned(plan, p.id, d) && !R.isWeekend(d)
+          .filter((d) => code(p.id, d) === 'R' && !R.isPinned(plan, p.id, d) && !isWished(p.id, d) && !R.isWeekend(d)
             && code(p.id, R.addDays(d, -1)) !== 'L')
           .filter((d) => {
             set(p.id, d, null);
@@ -260,13 +349,17 @@ const Solver = (() => {
     return plan;
   };
 
-  // Bewertung: Regelverstösse zuerst, danach Abweichung von R-Ziel und Fairness im Jahr.
-  const score = (persons, plan, ym) => {
+  // Bewertung: Regelverstösse zuerst, dann Wünsche, danach Abweichung von R-Ziel und Fairness im Jahr.
+  const score = (persons, plan, ym, wishes, fulfilledBefore) => {
     const issues = R.validate(persons, plan, ym);
     const year = Number(ym.slice(0, 4));
     let total = 0;
     for (const issue of issues) {
       total += issue.level === 'fehler' ? 100000 : issue.level === 'warnung' ? 1000 : 20;
+    }
+    const most = Math.max(0, ...Object.values(fulfilledBefore));
+    for (const r of R.wishResults(persons, wishes, plan, ym)) {
+      if (!r.ok) total += Math.min(900, 300 + (most - fulfilledBefore[r.pid]) * 60);
     }
     const accounts = persons.map((p) => [p, R.account(p, plan, year)]);
     const spread = (value) => {
@@ -275,6 +368,11 @@ const Solver = (() => {
       return values.reduce((a, b) => a + (b - mean) ** 2, 0) / values.length;
     };
     for (const s of R.SHIFTS) total += spread((k) => k.counts[s]) * 6;
+    const ncGroup = accounts.filter(([p]) => p.nc).map(([p, k]) => k.counts.NC / (p.pensum / 100));
+    if (ncGroup.length) {
+      const mean = ncGroup.reduce((a, b) => a + b, 0) / ncGroup.length;
+      total += (ncGroup.reduce((a, b) => a + (b - mean) ** 2, 0) / ncGroup.length) * 30;
+    }
     total += spread((k) => k.workedWeekendDays) * 6;
     total += spread((k) => k.saldo) * 0.5;
     for (const p of persons) {
@@ -284,13 +382,14 @@ const Solver = (() => {
     return { total, issues };
   };
 
-  const generate = (persons, basePlan, ym, { timeMs = 1500, seed = 1 } = {}) => {
+  const generate = (persons, basePlan, ym, { timeMs = 1500, seed = 1, wishes = {} } = {}) => {
     const started = Date.now();
+    const fulfilledBefore = R.wishesFulfilledBefore(persons, wishes, basePlan, ym);
     let best = null;
     let runs = 0;
     do {
-      const plan = attempt(persons, basePlan, ym, seed + runs * 7919);
-      const result = score(persons, plan, ym);
+      const plan = attempt(persons, basePlan, ym, seed + runs * 7919, wishes, fulfilledBefore, runs === 0 ? 0 : runs === 1 ? 1 : 0.12);
+      const result = score(persons, plan, ym, wishes, fulfilledBefore);
       if (!best || result.total < best.total) best = { plan, ...result };
       runs++;
     } while (Date.now() - started < timeMs);
