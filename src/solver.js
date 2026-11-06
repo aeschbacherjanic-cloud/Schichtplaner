@@ -117,7 +117,9 @@ const Solver = (() => {
     const blockSteps = ['1600', 'N1', 'N2', 'L', 'R'];
     const canBlock = (pid, d, from) => {
       const free = blockSteps.slice(from).every((step, i) => {
-        const c = code(pid, R.addDays(d, i));
+        const day = R.addDays(d, i);
+        const c = code(pid, day);
+        if (step !== 'R' && R.isVacationWeekend(plan, pid, day)) return false; // auch im Folgemonat
         return c === null || (step === 'R' && R.ABSENCE.has(c)) || c === step;
       });
       if (!free) return false;
@@ -145,7 +147,12 @@ const Solver = (() => {
       for (const p of persons) {
         if (!canBlock(p.id, d, from)) continue;
         const gap = lastBlock[p.id] ? (new Date(d) - new Date(lastBlock[p.id])) / 864e5 : 99;
-        const score = (usage[p.id]['1600'] + 1) / (p.pensum / 100) + (gap < 14 ? (14 - gap) * 0.6 : 0) + random() * 0.8;
+        const lostSunday = blockSteps.slice(from, 4).some((_, i) => {
+          const day = R.addDays(d, i);
+          return R.isSunday(day) && missedSundays(p.id, day);
+        });
+        const score = (usage[p.id]['1600'] + 1) / (p.pensum / 100) + (gap < 14 ? (14 - gap) * 0.6 : 0)
+          + (lostSunday ? 20 : 0) + random() * 0.8;
         if (score < bestScore) {
           bestScore = score;
           best = p;
@@ -204,6 +211,20 @@ const Solver = (() => {
         if (R.isWeekend(d)) usage[pid].weekend++;
       }
       wished.add(`${pid}|${d}`);
+    }
+
+    // Ferien: Wochenenden davor und danach als R-Tage, danach wenn möglich Büro. Wird geschützt wie ein Wunsch.
+    for (const p of persons) {
+      for (const d of dates) {
+        if (code(p.id, d) !== null) continue;
+        if (R.isVacationWeekend(plan, p.id, d)) {
+          set(p.id, d, 'R');
+          wished.add(`${p.id}|${d}`);
+        } else if (R.startsAfterVacation(plan, p.id, d) && !termine.includes(d) && canWork(p.id, d, 'B', TIERS[0])) {
+          set(p.id, d, 'B');
+          wished.add(`${p.id}|${d}`);
+        }
+      }
     }
 
     // Instruktion: gleichmässig auf die drei Mittwoche verteilen

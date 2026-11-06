@@ -25,6 +25,7 @@ Umgesetzt in `src/rules.js`, Grundlage ist der GAV AOT vom 1. Januar 2025, Anhan
 - 11 h Ruhe vor jeder Schicht und 24 h pro R-Tag plus 11 h bei arbeitsfreien Tagen.
 - Höchstens 7 Arbeitstage in Folge, ein freier Tag pro Kalenderwoche, mindestens 8 R-Tage pro Monat und 117 pro Jahr.
 - Höchstens 14 Nachtarbeiten in 28 Tagen, 30 freie Sonntage pro Jahr, ein freier Sonntag pro 28 Tage.
+- Wochenenden direkt vor und nach Ferien sind R-Tage. Nach den Ferien wird wenn möglich mit einem Bürotag begonnen.
 - Eine Instruktion pro Person und Monat, an einem der ersten drei Mittwoche. Bürotage nur von Montag bis Freitag.
 
 Der Planer in `src/solver.js` rechnet viele Varianten durch und behält die beste. Er findet einen guten, aber nicht beweisbar optimalen Plan. Verkürzte Ruhezeiten nutzt er nur, wenn es nicht anders geht.

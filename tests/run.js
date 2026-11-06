@@ -240,6 +240,46 @@ test('RU: bleibt beim Erzeugen erhalten, der Planer plant darum herum', () => {
   assert.equal(R.monthDates('2027-06').filter((d) => R.getCode(out, 'p07', d) === 'RU').length, 10);
 });
 
+test('Ferien: Erkennung der Wochenenden und des ersten Werktags', () => {
+  const plan = {};
+  for (const d of ['2027-05-10', '2027-05-11', '2027-05-12', '2027-05-13', '2027-05-14']) R.setCode(plan, 'a', d, 'F', true);
+  for (const d of ['2027-05-08', '2027-05-09', '2027-05-15', '2027-05-16']) assert.equal(R.isVacationWeekend(plan, 'a', d), true, d);
+  assert.equal(R.isVacationWeekend(plan, 'a', '2027-05-01'), false);
+  assert.equal(R.isVacationWeekend(plan, 'a', '2027-05-22'), false);
+  assert.equal(R.startsAfterVacation(plan, 'a', '2027-05-17'), true);
+  assert.equal(R.startsAfterVacation(plan, 'a', '2027-05-18'), false);
+  assert.equal(R.startsAfterVacation(plan, 'a', '2027-05-10'), false);
+  const midweek = {};
+  R.setCode(midweek, 'a', '2027-05-11', 'F', true);
+  assert.equal(R.startsAfterVacation(midweek, 'a', '2027-05-12'), true);
+  assert.equal(R.isVacationWeekend(midweek, 'a', '2027-05-08'), false);
+});
+
+test('Ferien: Prüfung warnt bei Einsatz am Ferien-Wochenende und weist auf Schichtstart hin', () => {
+  const plan = {};
+  for (const d of ['2027-05-10', '2027-05-11', '2027-05-12', '2027-05-13', '2027-05-14']) R.setCode(plan, 'a', d, 'F', true);
+  R.setCode(plan, 'a', '2027-05-08', '0930');
+  R.setCode(plan, 'a', '2027-05-17', '0730');
+  const issues = rulesFor(plan, '2027-05');
+  assert.ok(has(issues, 'Ferien-Wochenende', 'warnung'));
+  assert.ok(has(issues, 'Start nach Ferien', 'hinweis'));
+});
+
+test('Ferien: Planer hält Wochenenden frei und beginnt danach im Büro', () => {
+  const plan = {};
+  const weeks = [['p03', '2027-05-10'], ['p04', '2027-05-10'], ['p05', '2027-05-17'], ['p06', '2027-05-03']];
+  for (const [pid, monday] of weeks) for (let i = 0; i < 5; i++) R.setCode(plan, pid, R.addDays(monday, i), 'F', true);
+  const { plan: out, issues } = Solver.generate(team, plan, '2027-05', { timeMs: 400 });
+  assert.equal(issues.filter((i) => i.level === 'fehler').length, 0);
+  for (const [pid, monday] of weeks) {
+    for (const n of [-2, -1, 5, 6]) {
+      const d = R.addDays(monday, n);
+      if (d.startsWith('2027-05')) assert.equal(R.getCode(out, pid, d), 'R', `${pid} ${d}`);
+    }
+    assert.equal(R.getCode(out, pid, R.addDays(monday, 7)), 'B', `${pid} Montag danach`);
+  }
+});
+
 test('Fixierte Einträge bleiben beim Erzeugen erhalten', () => {
   const plan = {};
   R.setCode(plan, 'p05', '2027-02-10', 'F', true);

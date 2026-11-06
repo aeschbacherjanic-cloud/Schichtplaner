@@ -104,6 +104,19 @@ const Rules = (() => {
     return Math.max(8, Math.round(perDay * daysInMonth(ym) + carry));
   };
 
+  // Wochenende direkt vor oder nach Ferien bzw. RU: Es soll aus R-Tagen bestehen.
+  const isVacationWeekend = (plan, pid, d) => {
+    if (!isWeekend(d)) return false;
+    const saturday = weekday(d) === 5 ? d : addDays(d, -1);
+    return ABSENCE.has(getCode(plan, pid, addDays(saturday, -1))) || ABSENCE.has(getCode(plan, pid, addDays(saturday, 2)));
+  };
+
+  // Erster Werktag nach Ferien bzw. RU, ein Wochenende dazwischen zählt nicht.
+  const startsAfterVacation = (plan, pid, d) => {
+    if (isWeekend(d) || ABSENCE.has(getCode(plan, pid, d))) return false;
+    return ABSENCE.has(getCode(plan, pid, addDays(d, weekday(d) === 0 ? -3 : -1)));
+  };
+
   // Mindestruhe vor einem Einsatz in Minuten: 11 h, mit R-Tagen dazwischen 24 h pro R-Tag plus 11 h.
   const requiredRest = (rDays) => (rDays > 0 ? rDays * 24 * 60 + 11 * 60 : 11 * 60);
 
@@ -261,6 +274,17 @@ const Rules = (() => {
         }
       }
 
+      // Ferien: Wochenenden davor und danach als R-Tage, danach wenn möglich mit Büro beginnen
+      for (const d of dates) {
+        const c = code(d);
+        if (c && c !== 'R' && !ABSENCE.has(c) && isVacationWeekend(plan, p.id, d)) {
+          issue('warnung', 'Ferien-Wochenende', d, `Das Wochenende vor oder nach den Ferien soll aus R-Tagen bestehen, eingeteilt ist ${CODES[c].label}.`);
+        }
+        if (SHIFTS.includes(c) && startsAfterVacation(plan, p.id, d)) {
+          issue('hinweis', 'Start nach Ferien', d, `Nach den Ferien beginnt die Person mit ${CODES[c].label} statt mit einem Bürotag.`);
+        }
+      }
+
       // Instruktion und Büro
       const allowed = instructionDates(ym);
       const instruction = dates.filter((d) => code(d) === 'I');
@@ -376,7 +400,7 @@ const Rules = (() => {
   return {
     CODES, SHIFTS, CODE_ORDER, WORK, FREE, ABSENCE, RU_DAYS, NEXT_IN_BLOCK,
     creditedHours, addDays, weekday, isWeekend, isSunday, daysInMonth, monthDates, yearMonths,
-    instructionDates, isAirac, getCode, isPinned, setCode, vacationDays, yearTargetR, monthTargetR,
+    instructionDates, isAirac, isVacationWeekend, startsAfterVacation, getCode, isPinned, setCode, vacationDays, yearTargetR, monthTargetR,
     requiredRest, workPairs, validate, isFreeSunday, account, fmtDate, mondayOf,
     MAX_WISHES_PER_MONTH, WISH_CODES, wishLabel, wishesInMonth, wishResults, wishesFulfilledBefore,
   };
