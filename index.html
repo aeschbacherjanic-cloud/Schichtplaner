@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="de-CH">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Schichtplaner</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <h1>Schichtplaner</h1>
+    <nav class="tabs" aria-label="Bereiche">
+      <button class="tab" data-tab="plan">Plan</button>
+      <button class="tab" data-tab="konto">Jahreskonto</button>
+      <button class="tab" data-tab="personen">Personen und Ferien</button>
+    </nav>
+    <div class="spacer"></div>
+    <button id="btn-export">Daten sichern</button>
+    <label class="button">Daten laden<input id="input-import" type="file" accept="application/json" hidden></label>
+  </header>
+
+  <main>
+    <section id="view-plan" class="view">
+      <div class="toolbar">
+        <div class="month-nav">
+          <button id="btn-prev" aria-label="Vorheriger Monat">‹</button>
+          <strong id="month-label"></strong>
+          <button id="btn-next" aria-label="Nächster Monat">›</button>
+        </div>
+        <button id="btn-generate" class="primary">Plan erzeugen</button>
+        <button id="btn-clear">Monat leeren</button>
+        <button id="btn-csv">Als CSV für Excel</button>
+        <button id="btn-print">Drucken</button>
+        <span id="status" class="status" role="status"></span>
+      </div>
+      <div id="summary" class="summary"></div>
+      <div class="grid-wrap"><table id="grid" class="grid"></table></div>
+      <div class="legend" id="legend"></div>
+      <div id="issues"></div>
+    </section>
+
+    <section id="view-konto" class="view">
+      <div class="toolbar">
+        <strong id="konto-year"></strong>
+        <span class="muted">Stand aller Monate, die in diesem Jahr geplant sind. Der Saldo vergleicht die geplanten Tage mit dem Soll für dieselbe Zeit.</span>
+      </div>
+      <div class="grid-wrap"><table id="konto" class="data"></table></div>
+    </section>
+
+    <section id="view-personen" class="view">
+      <div class="panel">
+        <h2>Ferien eintragen</h2>
+        <p class="muted">Eingetragen werden die Tage von Montag bis Freitag. Sie gelten beim Erzeugen als fix.</p>
+        <form id="form-ferien" class="row">
+          <label>Person <select id="ferien-person"></select></label>
+          <label>Von <input id="ferien-von" type="date" required></label>
+          <label>Bis <input id="ferien-bis" type="date" required></label>
+          <button class="primary">Eintragen</button>
+          <button type="button" id="btn-ferien-weg">Ferien im Zeitraum löschen</button>
+        </form>
+      </div>
+      <div class="panel">
+        <h2>Personen</h2>
+        <p class="muted">Der Jahrgang bestimmt den Ferienanspruch nach GAV 2.5.1. Daten bleiben nur in diesem Browser gespeichert.</p>
+        <div class="grid-wrap"><table id="personen" class="data"></table></div>
+        <button id="btn-add-person">Person hinzufügen</button>
+      </div>
+    </section>
+  </main>
+
+  <div id="picker" class="picker" hidden></div>
+
+  <script src="src/rules.js"></script>
+  <script src="src/solver.js"></script>
+  <script src="src/app.js"></script>
+</body>
+</html>
