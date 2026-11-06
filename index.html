@@ -50,14 +50,15 @@
 
     <section id="view-personen" class="view">
       <div class="panel">
-        <h2>Ferien eintragen</h2>
-        <p class="muted">Eingetragen werden die Tage von Montag bis Freitag. Sie gelten beim Erzeugen als fix.</p>
+        <h2>Ferien und Regenerationsurlaub eintragen</h2>
+        <p class="muted">Eingetragen werden die Tage von Montag bis Freitag. Sie gelten beim Erzeugen als fix. Ein RU umfasst 10 Tage: 5 aus den eigenen Ferien, 5 von der Firma.</p>
         <form id="form-ferien" class="row">
           <label>Person <select id="ferien-person"></select></label>
+          <label>Art <select id="ferien-art"><option value="F">Ferien</option><option value="RU">RU</option></select></label>
           <label>Von <input id="ferien-von" type="date" required></label>
           <label>Bis <input id="ferien-bis" type="date" required></label>
           <button class="primary">Eintragen</button>
-          <button type="button" id="btn-ferien-weg">Ferien im Zeitraum löschen</button>
+          <button type="button" id="btn-ferien-weg">Im Zeitraum löschen</button>
         </form>
       </div>
       <div class="panel">

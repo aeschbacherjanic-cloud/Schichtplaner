@@ -8,7 +8,7 @@ Webseite zum Erstellen von Monatsplänen für ein 24/7-Team. Der fertige Plan wi
 Personen, Ferien und Pläne liegen nur im Browser (`localStorage`), nicht in diesem Repository. Mit **Daten sichern** entsteht eine Sicherungsdatei. Diese enthält Personendaten und gehört nicht ins Repository.
 
 ## Bedienung
-1. Unter **Personen und Ferien** Namen, Pensum und Jahrgang erfassen und die Ferien eintragen.
+1. Unter **Personen und Ferien** Namen, Pensum und Jahrgang erfassen und Ferien sowie Regenerationsurlaub (RU) eintragen. Ein RU umfasst 10 Tage, davon 5 aus den eigenen Ferien und 5 von der Firma.
 2. Unter **Plan** den Monat wählen und **Plan erzeugen** klicken.
 3. Einzelne Tage durch Anklicken ändern. Von Hand gesetzte Einträge sind fixiert und bleiben beim nächsten Erzeugen erhalten.
 4. Wünsche werden im selben Menü wie die Tage erfasst, höchstens 5 pro Person und Monat. Sie sind unverbindlich: GAV und Besetzung gehen vor, und wer im Jahr bisher weniger erfüllte Wünsche hat, kommt zuerst dran.

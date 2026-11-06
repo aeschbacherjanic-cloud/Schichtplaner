@@ -118,7 +118,7 @@ const Solver = (() => {
     const canBlock = (pid, d, from) => {
       const free = blockSteps.slice(from).every((step, i) => {
         const c = code(pid, R.addDays(d, i));
-        return c === null || (step === 'R' && c === 'F') || c === step;
+        return c === null || (step === 'R' && R.ABSENCE.has(c)) || c === step;
       });
       if (!free) return false;
       const workDays = blockSteps.slice(from).filter((step) => R.WORK.has(step)).map((_, i) => R.addDays(d, i));
@@ -162,7 +162,7 @@ const Solver = (() => {
       const free = (pid) => {
         const next = code(pid, R.addDays(d, 1));
         const after = code(pid, R.addDays(d, 2));
-        return (next === null || next === 'L') && (after === null || after === 'R' || after === 'F');
+        return (next === null || next === 'L') && (after === null || after === 'R' || R.ABSENCE.has(after));
       };
       const options = persons
         .filter((p) => p.nc && free(p.id) && canWork(p.id, d, 'NC', TIERS[2]))

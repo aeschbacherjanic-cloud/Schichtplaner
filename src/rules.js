@@ -17,11 +17,14 @@ const Rules = (() => {
     L: { label: 'Leave' },
     R: { label: 'R-Tag' },
     F: { label: 'Ferien' },
+    RU: { label: 'RU' },
   };
   const SHIFTS = ['0530', '0730', '0930', '1400', '1600', 'N1', 'N2'];
-  const CODE_ORDER = [...SHIFTS, 'NC', 'B', 'I', 'L', 'R', 'F'];
+  const CODE_ORDER = [...SHIFTS, 'NC', 'B', 'I', 'L', 'R', 'F', 'RU'];
   const WORK = new Set([...SHIFTS, 'NC', 'B', 'I']);
-  const FREE = new Set(['R', 'F', 'L']);
+  const FREE = new Set(['R', 'F', 'RU', 'L']);
+  const ABSENCE = new Set(['F', 'RU']);
+  const RU_DAYS = 10; // davon 5 aus den eigenen Ferien und 5 von der Firma
   const NEXT_IN_BLOCK = { 1600: 'N1', N1: 'N2', N2: 'L', NC: 'L', L: 'R' };
 
   const STANDARD_HOURS = 8.2;
@@ -176,7 +179,7 @@ const Rules = (() => {
         const after = code(addDays(d, 1));
         const expected = NEXT_IN_BLOCK[c];
         if (expected && after) {
-          const ok = c === 'L' ? after === 'R' || after === 'F' : after === expected;
+          const ok = c === 'L' ? after === 'R' || ABSENCE.has(after) : after === expected;
           if (!ok) issue('fehler', 'Nachtblock', d, `Auf ${CODES[c].label} muss ${expected === 'R' ? 'ein R-Tag oder Ferien' : CODES[expected].label} folgen.`);
         }
         const previous = { N1: '1600', N2: 'N1' }[c];
@@ -280,8 +283,11 @@ const Rules = (() => {
       // Jahresregeln, sobald das Jahr vollständig geplant ist
       const entitled = vacationDays(p.birthYear, year);
       const k = account(p, plan, year);
-      if (k.counts.F > entitled) {
-        add('warnung', 'Ferien', p.id, null, `${who}: ${k.counts.F} Ferientage eingetragen, Anspruch sind ${entitled}.`);
+      if (k.vacationUsed > entitled) {
+        add('warnung', 'Ferien', p.id, null, `${who}: ${k.vacationUsed} Ferientage verbraucht, Anspruch sind ${entitled}.`);
+      }
+      if (k.counts.RU > 0 && k.counts.RU !== RU_DAYS) {
+        add('warnung', 'RU', p.id, null, `${who}: ${k.counts.RU} RU-Tage im Jahr ${year} eingetragen, ein RU umfasst ${RU_DAYS} Tage.`);
       }
       if (ym.endsWith('-12') && k.plannedDays === daysInYear(year)) {
         if (k.counts.R < 117) add('fehler', 'R-Tage pro Jahr', p.id, null, `${who}: ${k.counts.R} R-Tage im Jahr, Minimum sind 117.`);
@@ -295,7 +301,7 @@ const Rules = (() => {
   // Ein Sonntag zählt nur, wenn er von 0 bis 24 Uhr frei ist.
   const isFreeSunday = (plan, pid, d) => {
     const c = getCode(plan, pid, d);
-    if (c !== 'R' && c !== 'F') return false;
+    if (c !== 'R' && !ABSENCE.has(c)) return false;
     const before = getCode(plan, pid, addDays(d, -1));
     return before !== 'N1' && before !== 'N2' && before !== 'NC';
   };
@@ -345,8 +351,8 @@ const Rules = (() => {
         if (!c) continue;
         counts[c]++;
         plannedDays++;
-        // Ein Ferientag zählt entsprechend dem Pensum.
-        hours += c === 'F' ? STANDARD_HOURS * (person.pensum / 100) : creditedHours(c);
+        // Ferien- und RU-Tage zählen entsprechend dem Pensum.
+        hours += ABSENCE.has(c) ? STANDARD_HOURS * (person.pensum / 100) : creditedHours(c);
         if (isSunday(d) && isFreeSunday(plan, person.id, d)) freeSundays++;
         if (isWeekend(d) && WORK.has(c)) workedWeekendDays++;
       }
@@ -362,12 +368,13 @@ const Rules = (() => {
       workedWeekendDays,
       nightBlocks: counts['1600'],
       targetR: yearTargetR(person),
+      vacationUsed: counts.F + counts.RU / 2,
       vacationEntitlement: vacationDays(person.birthYear, year),
     };
   };
 
   return {
-    CODES, SHIFTS, CODE_ORDER, WORK, FREE, NEXT_IN_BLOCK,
+    CODES, SHIFTS, CODE_ORDER, WORK, FREE, ABSENCE, RU_DAYS, NEXT_IN_BLOCK,
     creditedHours, addDays, weekday, isWeekend, isSunday, daysInMonth, monthDates, yearMonths,
     instructionDates, isAirac, getCode, isPinned, setCode, vacationDays, yearTargetR, monthTargetR,
     requiredRest, workPairs, validate, isFreeSunday, account, fmtDate, mondayOf,

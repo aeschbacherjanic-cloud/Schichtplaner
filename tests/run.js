@@ -113,6 +113,33 @@ test('NC: Ferientag zählt nach Pensum, NC zählt als Nachtarbeit', () => {
   assert.equal(R.isFreeSunday(planOf('2027-01-16', ['NC', 'R']), 'a', '2027-01-17'), false);
 });
 
+test('RU: 10 Tage verbrauchen 5 Ferientage und zählen wie Ferien', () => {
+  const plan = {};
+  const days = ['2027-05-03', '2027-05-04', '2027-05-05', '2027-05-06', '2027-05-07', '2027-05-10', '2027-05-11', '2027-05-12', '2027-05-13', '2027-05-14'];
+  days.forEach((d) => R.setCode(plan, 'a', d, 'RU', true));
+  R.setCode(plan, 'a', '2027-06-07', 'F', true);
+  const k = R.account(P('a'), plan, 2027);
+  assert.equal(k.counts.RU, 10);
+  assert.equal(k.vacationUsed, 6);
+  assert.ok(Math.abs(k.hours - 11 * 8.2) < 0.001);
+  assert.ok(Math.abs(R.account(P('a', 80), plan, 2027).hours - 11 * 6.56) < 0.001);
+  assert.ok(!rulesFor(plan, '2027-05').some((i) => i.rule === 'RU'));
+  R.setCode(plan, 'a', days[9], null);
+  assert.ok(rulesFor(plan, '2027-05').some((i) => i.rule === 'RU' && i.level === 'warnung'));
+});
+
+test('RU: zu wenig Ferien bleiben als Warnung sichtbar', () => {
+  const plan = {};
+  for (let i = 0; i < 28; i++) R.setCode(plan, 'a', R.addDays('2027-03-01', i), 'F', true);
+  for (let i = 0; i < 10; i++) R.setCode(plan, 'a', R.addDays('2027-05-03', i), 'RU', true);
+  assert.ok(rulesFor(plan, '2027-05').some((i) => i.rule === 'Ferien' && i.level === 'warnung'));
+});
+
+test('RU: Nach Leave gilt RU als frei, und der freie Sonntag zählt', () => {
+  assert.ok(!has(rulesFor(planOf('2027-05-03', ['N2', 'L', 'RU']), '2027-05'), 'Nachtblock', 'fehler'));
+  assert.equal(R.isFreeSunday(planOf('2027-05-08', ['RU', 'RU']), 'a', '2027-05-09'), true);
+});
+
 test('Mehr als 7 Arbeitstage in Folge', () => {
   const issues = rulesFor(planOf('2027-01-11', Array(8).fill('0730')), '2027-01');
   assert.ok(has(issues, 'Arbeitstage in Folge', 'fehler'));
@@ -200,6 +227,17 @@ test('Ganzes Jahr: alle Regeln eingehalten', () => {
     assert.equal(R.getCode(plan, holders[0].id, R.addDays(d, 1)), 'L', d);
   }
   assert.equal(errors.length, 0);
+});
+
+test('RU: bleibt beim Erzeugen erhalten, der Planer plant darum herum', () => {
+  const plan = {};
+  for (let i = 0; i < 12; i++) {
+    const d = R.addDays('2027-06-07', i);
+    if (!R.isWeekend(d)) R.setCode(plan, 'p07', d, 'RU', true);
+  }
+  const { plan: out, issues } = Solver.generate(team, plan, '2027-06', { timeMs: 300 });
+  assert.equal(issues.filter((i) => i.level === 'fehler').length, 0);
+  assert.equal(R.monthDates('2027-06').filter((d) => R.getCode(out, 'p07', d) === 'RU').length, 10);
 });
 
 test('Fixierte Einträge bleiben beim Erzeugen erhalten', () => {

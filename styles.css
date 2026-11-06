@@ -91,6 +91,7 @@ main { padding: 14px 16px 40px; }
 .c-I { background: #f5d3e4; color: #7a1e52; }
 .c-R { background: transparent; color: #66717f; font-weight: 400; }
 .c-F { background: #c7ecdf; color: #0f5a43; }
+.c-RU { background: #9fdcc5; color: #0b4a37; }
 
 .legend { display: flex; flex-wrap: wrap; gap: 5px; margin: 10px 0 14px; font-size: 12px; align-items: center; }
 .legend span { padding: 2px 8px; border-radius: 5px; font-weight: 600; }

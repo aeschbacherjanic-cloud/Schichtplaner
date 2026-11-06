@@ -4,7 +4,7 @@
   const STORAGE_KEY = 'schichtplaner-v1';
   const MONTHS = ['Januar', 'Februar', 'März', 'April', 'Mai', 'Juni', 'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember'];
   const DAYS = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'];
-  const SHORT = { B: 'B', I: 'I', L: 'L', R: 'R', F: 'F' };
+  const SHORT = { B: 'B', I: 'I', L: 'L', R: 'R', F: 'F', RU: 'RU' };
   const $ = (id) => document.getElementById(id);
 
   const samplePersons = () => {
@@ -163,7 +163,7 @@
   function renderKonto() {
     const year = Number(state.month.slice(0, 4));
     $('konto-year').textContent = `Jahr ${year}`;
-    const columns = ['Person', 'Pensum', 'Tage geplant', 'R-Tage', 'Jahresziel R', 'Ferien', 'Anspruch', 'Freie Sonntage', 'Nachtblöcke', 'NC', 'Leave', 'Büro', 'Instruktion', '0530', '0730', '0930', '1400', 'Weekend-Einsätze', 'Saldo h', 'Wünsche erfüllt'];
+    const columns = ['Person', 'Pensum', 'Tage geplant', 'R-Tage', 'Jahresziel R', 'Ferien verbraucht', 'Anspruch', 'RU', 'Freie Sonntage', 'Nachtblöcke', 'NC', 'Leave', 'Büro', 'Instruktion', '0530', '0730', '0930', '1400', 'Weekend-Einsätze', 'Saldo h', 'Wünsche erfüllt'];
     const head = el('tr', {}, ...columns.map((text) => el('th', { text })));
     const rows = state.persons.map((p) => {
       const k = R.account(p, state.plan, year);
@@ -172,11 +172,11 @@
         .filter((r) => r.actual);
       const cells = [
         p.name, `${p.pensum} %`, k.plannedDays, k.counts.R, k.targetR.toFixed(1).replace(/\.0$/, ''),
-        k.counts.F, k.vacationEntitlement, k.freeSundays, k.nightBlocks, k.counts.NC, k.counts.L, k.counts.B, k.counts.I,
+        k.vacationUsed, k.vacationEntitlement, k.counts.RU, k.freeSundays, k.nightBlocks, k.counts.NC, k.counts.L, k.counts.B, k.counts.I,
         k.counts['0530'], k.counts['0730'], k.counts['0930'], k.counts['1400'], k.workedWeekendDays,
         k.saldo.toFixed(1), `${wishResults.filter((r) => r.ok).length} / ${wishResults.length}`,
       ].map((text) => el('td', { text }));
-      if (k.counts.F > k.vacationEntitlement) cells[5].classList.add('bad');
+      if (k.vacationUsed > k.vacationEntitlement) cells[5].classList.add('bad');
       return el('tr', {}, ...cells);
     });
     $('konto').replaceChildren(el('thead', {}, head), el('tbody', {}, ...rows));
@@ -409,15 +409,16 @@
   $('form-ferien').addEventListener('submit', (e) => {
     e.preventDefault();
     const pid = $('ferien-person').value;
+    const kind = $('ferien-art').value;
     let added = 0;
     eachDay($('ferien-von').value, $('ferien-bis').value, (d) => {
       if (!R.isWeekend(d)) {
-        R.setCode(state.plan, pid, d, 'F', true);
+        R.setCode(state.plan, pid, d, kind, true);
         added++;
       }
     });
     save();
-    alert(`${added} Ferientage eingetragen.`);
+    alert(`${added} Tage ${R.CODES[kind].label} eingetragen.`);
   });
   $('btn-ferien-weg').addEventListener('click', () => {
     const pid = $('ferien-person').value;
@@ -425,7 +426,7 @@
     const to = $('ferien-bis').value;
     if (!from || !to) return;
     eachDay(from, to, (d) => {
-      if (R.getCode(state.plan, pid, d) === 'F') R.setCode(state.plan, pid, d, null);
+      if (R.getCode(state.plan, pid, d) === $('ferien-art').value) R.setCode(state.plan, pid, d, null);
     });
     save();
   });
