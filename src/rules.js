@@ -199,6 +199,8 @@ const Rules = (() => {
         const label = `${pair.prevCode} zu ${pair.code}`;
         if (pair.rDays > 0 && pair.rest < requiredRest(pair.rDays)) {
           issue('fehler', 'Arbeitsfreier Tag', pair.to, `${label}: ${fmtRest(pair.rest)} Ruhe, nötig für ${pair.rDays} R-Tag(e) sind ${fmtRest(requiredRest(pair.rDays))}.`);
+        } else if (pair.rest < 0) {
+          issue('fehler', 'Ruhezeit', pair.to, `${label}: Die Einsätze überschneiden sich.`);
         } else if (pair.rDays === 0 && pair.rest < 480) {
           issue('fehler', 'Ruhezeit', pair.to, `${label}: nur ${fmtRest(pair.rest)} Ruhe, Minimum sind 8 h.`);
         } else if (pair.rDays === 0 && pair.rest < 540) {

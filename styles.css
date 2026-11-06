@@ -123,6 +123,7 @@ main { padding: 14px 16px 40px; }
 .picker[hidden] { display: none; }
 .picker button { padding: 5px 2px; font-size: 12px; font-weight: 600; border-color: var(--line); }
 .picker .wide { grid-column: span 2; font-weight: 400; background: var(--surface); }
+.picker .plain { font-weight: 400; background: var(--surface); }
 .picker .wish-choice { background: var(--surface); font-weight: 400; }
 .picker .wish-choice.chosen { border-color: var(--accent); color: var(--accent); font-weight: 600; }
 .picker button:disabled { opacity: .45; cursor: default; }

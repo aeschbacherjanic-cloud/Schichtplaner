@@ -241,7 +241,7 @@
       closePicker();
       renderPlan();
     });
-    const clear = el('button', { type: 'button', class: 'wide', text: 'Leeren' });
+    const clear = el('button', { type: 'button', class: 'plain', text: 'Leeren' });
     clear.addEventListener('click', () => {
       R.setCode(state.plan, pid, date, null);
       save();
